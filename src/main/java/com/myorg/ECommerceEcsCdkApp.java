@@ -1,41 +1,118 @@
 package com.myorg;
 
-import software.amazon.awscdk.App;
-import software.amazon.awscdk.Environment;
-import software.amazon.awscdk.StackProps;
+import java.util.HashMap;
+import java.util.Map;
 
-import java.util.Arrays;
+import software.amazon.awscdk.App;
+import software.amazon.awscdk.StackProps;
+import software.amazon.awscdk.Environment;
 
 public class ECommerceEcsCdkApp {
     public static void main(final String[] args) {
         App app = new App();
+        Environment environment = Environment.builder()
+            .account("390231347566")
+            .region("ap-northeast-2")
+            .build();
+        
+        Map<String, String> infraTags = new HashMap<>();
+        infraTags.put("team", "ShvmsnhaCode");
+        infraTags.put("cost", "ECommerceInfra");
 
-        new ECommerceEcsCdkStack(app, "ECommerceEcsCdkStack", StackProps.builder()
-                // If you don't specify 'env', this stack will be environment-agnostic.
-                // Account/Region-dependent features and context lookups will not work,
-                // but a single synthesized template can be deployed anywhere.
+        ECRStack ecrStack = new ECRStack(app, "Ecr", StackProps.builder()
+            .env(environment)
+            .tags(infraTags)
+            .build());
 
-                // Uncomment the next block to specialize this stack for the AWS Account
-                // and Region that are implied by the current CLI configuration.
-                /*
-                .env(Environment.builder()
-                        .account(System.getenv("CDK_DEFAULT_ACCOUNT"))
-                        .region(System.getenv("CDK_DEFAULT_REGION"))
-                        .build())
-                */
+        VPCStack vpcStack = new VPCStack(app, "Vpc", StackProps.builder()
+            .env(environment)
+            .tags(infraTags)
+            .build());
+        
+        ClusterStack clusterStack = new ClusterStack(app, "Cluster", StackProps.builder()
+            .env(environment)
+            .tags(infraTags)
+            .build(), new ClusterStackProps(vpcStack.getVpc()));
+        clusterStack.addDependency(vpcStack);
 
-                // Uncomment the next block if you know exactly what Account and Region you
-                // want to deploy the stack to.
-                /*
-                .env(Environment.builder()
-                        .account("123456789012")
-                        .region("us-east-1")
-                        .build())
-                */
+        NlbStack nlbStack = new NlbStack(app, "LoadBalncer", StackProps.builder()
+        .env(environment)
+        .tags(infraTags)
+        .build(), new NlbStackProps(vpcStack.getVpc()));
+        nlbStack.addDependency(vpcStack);
 
-                // For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
-                .build());
+        ApiStack apiStack = new ApiStack(app, "Api", StackProps.builder()
+            .env(environment)
+            .tags(infraTags)
+            .build(), new ApiStackProps(nlbStack.getNetworkLoadBalancer(), nlbStack.getVpcLink()));
+        
+        apiStack.addDependency(nlbStack);
 
+        Map<String, String> productsServiceTags = new HashMap<>();
+        productsServiceTags.put("team", "ShvmsnhaCode");
+        productsServiceTags.put("cost", "ProductService");
+
+        ProductsServiceStack productServiceStack = new ProductsServiceStack(app, 
+            "ProductsService", StackProps.builder()
+                .env(environment)
+                .tags(productsServiceTags)
+                .build(), new ProductsServiceStackProps(
+                    clusterStack.getCluster(), 
+                    vpcStack.getVpc(), 
+                    nlbStack.getNetworkLoadBalancer(), 
+                    nlbStack.getApplicationLoadBalancer(), 
+                    ecrStack.getProductServiceRepository()));
+
+        productServiceStack.addDependency(vpcStack);
+        productServiceStack.addDependency(clusterStack);
+        productServiceStack.addDependency(nlbStack);
+        productServiceStack.addDependency(ecrStack);
+        productServiceStack.addDependency(apiStack);
+
+        Map<String, String> auditServiceTags = new HashMap<>();
+        auditServiceTags.put("team", "ShvmsnhaCode");
+        auditServiceTags.put("cost", "AuditService");
+
+        AuditServiceStack auditServiceStack = new AuditServiceStack(app, 
+            "AuditService", StackProps.builder()
+            .env(environment)
+            .tags(auditServiceTags)
+            .build(), new AuditServiceStackProps(
+                clusterStack.getCluster(), 
+                vpcStack.getVpc(), 
+                nlbStack.getNetworkLoadBalancer(), 
+                nlbStack.getApplicationLoadBalancer(),
+                ecrStack.getAuditServiceRepository(), 
+                productServiceStack.getProductEventsTopic()));
+        
+        auditServiceStack.addDependency(vpcStack);
+        auditServiceStack.addDependency(clusterStack);
+        auditServiceStack.addDependency(nlbStack);
+        auditServiceStack.addDependency(ecrStack);
+        auditServiceStack.addDependency(productServiceStack);
+        auditServiceStack.addDependency(apiStack);
+
+        Map<String, String> invoicesServiceTags = new HashMap<>();
+        invoicesServiceTags.put("team", "ShvmsnhaCode");
+        invoicesServiceTags.put("cost", "InvoicesService");
+
+        InvoicesServiceStack invoicesServiceStack = new InvoicesServiceStack(app, 
+            "InvoicesService", StackProps.builder()
+            .env(environment)
+            .tags(invoicesServiceTags)
+            .build(), new InvoicesServiceStackProps(
+                clusterStack.getCluster(), 
+                vpcStack.getVpc(), 
+                nlbStack.getNetworkLoadBalancer(), 
+                nlbStack.getApplicationLoadBalancer(),
+                ecrStack.getInvoiceServiceRepository()));
+        invoicesServiceStack.addDependency(vpcStack);
+        invoicesServiceStack.addDependency(clusterStack);
+        invoicesServiceStack.addDependency(nlbStack);
+        invoicesServiceStack.addDependency(ecrStack);
+        invoicesServiceStack.addDependency(productServiceStack);
+        invoicesServiceStack.addDependency(apiStack);
+        
         app.synth();
     }
 }
